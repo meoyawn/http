@@ -1,3 +1,9 @@
+## 3.1.0+happen.1
+
+- Fix connection flow control for late DATA after a stream reset: do not emit
+  zero WINDOW_UPDATE increments and account for nonempty ignored DATA before
+  returning its credit. See [dart-lang/http#2051](https://github.com/dart-lang/http/issues/2051).
+
 ## 3.1.0
 
 - Gracefully handle receiving headers on a stream that the client has canceled. (#1799)

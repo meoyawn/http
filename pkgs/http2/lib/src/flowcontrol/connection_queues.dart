@@ -279,7 +279,14 @@ class ConnectionMessageQueueIn extends Object
   /// If a [DataFrame] will be ignored, this method will take the minimal
   /// action necessary.
   void processIgnoredDataFrame(DataFrame frame) {
-    _windowUpdateHandler.dataProcessed(frame.bytes.length);
+    // Late DATA after RST_STREAM still consumes connection credit. Empty DATA
+    // consumes none; sending WINDOW_UPDATE(0) is a connection protocol error.
+    final length = frame.bytes.length;
+    if (length == 0) {
+      return;
+    }
+    _windowUpdateHandler.gotData(length);
+    _windowUpdateHandler.dataProcessed(length);
   }
 
   /// Processes an incoming [HeadersFrame] which is addressed to a specific

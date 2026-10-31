@@ -2,12 +2,16 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:async';
+
 import 'package:http2/src/async_utils/async_utils.dart';
 import 'package:http2/src/flowcontrol/connection_queues.dart';
 import 'package:http2/src/flowcontrol/queue_messages.dart';
 import 'package:http2/src/flowcontrol/window.dart';
 import 'package:http2/src/flowcontrol/window_handler.dart';
 import 'package:http2/src/frames/frames.dart';
+import 'package:http2/src/hpack/hpack.dart' show HPackContext;
+import 'package:http2/src/settings/settings.dart';
 import 'package:http2/transport.dart';
 import 'package:mockito/mockito.dart';
 import 'package:test/test.dart';
@@ -151,21 +155,35 @@ void main() {
       // TODO: Write tests for adding HeadersFrame/PushPromiseFrame.
     });
 
-    test('connection-ignored-message-queue-in', () {
-      const STREAM_ID = 99;
-      final bytes = [1, 2, 3];
+    for (final bytes in [<int>[], [1, 2, 3]]) {
+      test('ignored DATA accounts for ${bytes.length} bytes', () async {
+        final outgoing = StreamController<List<int>>();
+        final written = outgoing.stream.expand((chunk) => chunk).toList();
+        final writer = FrameWriter(
+          HPackContext().encoder,
+          outgoing,
+          ActiveSettings(),
+        );
+        final window = Window();
+        final initialSize = window.size;
+        final queue = ConnectionMessageQueueIn(
+          IncomingWindowHandler.connection(writer, window),
+          (f) => f(),
+        );
 
-      var windowMock = MockIncomingWindowHandler();
-      when(windowMock.gotData(any)).thenReturn(null);
-      var queue = ConnectionMessageQueueIn(windowMock, (f) => f());
+        final header = FrameHeader(bytes.length, FrameType.DATA, 0, 99);
+        queue.processIgnoredDataFrame(DataFrame(header, 0, bytes));
+        await writer.close();
 
-      // Insert a [DataFrame] and let it be buffered.
-      var header = FrameHeader(0, 0, 0, STREAM_ID);
-      queue.processIgnoredDataFrame(DataFrame(header, 0, bytes));
-      expect(queue.pendingMessages, 0);
-      verify(windowMock.dataProcessed(bytes.length)).called(1);
-      verifyNoMoreInteractions(windowMock);
-    });
+        expect(queue.pendingMessages, 0);
+        expect(window.size, initialSize);
+        // Only nonempty DATA earns connection credit. RFC 9113 forbids a
+        // WINDOW_UPDATE with an increment of zero.
+        expect(await written, bytes.isEmpty ? isEmpty : [
+          0, 0, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0, bytes.length,
+        ]);
+      });
+    }
   });
 }
 
